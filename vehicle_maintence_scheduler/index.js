@@ -1,3 +1,4 @@
+// Initial configuration and dependency loading
 require('dotenv').config({ path: '.env.local' });
 const axios = require('axios');
 const knapsack = require('./knapsack');
@@ -43,6 +44,7 @@ async function main() {
   const depots = await fetchDepots();
   const vehicles = await fetchVehicles();
 
+  // Processing each depot to find the best set of maintenance tasks
   const results = depots.map(depot => {
     const { maxImpact, selectedTasks, hoursUsed } = knapsack(vehicles, depot.MechanicHours);
 

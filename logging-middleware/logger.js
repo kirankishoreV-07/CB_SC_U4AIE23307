@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 
+// Helper for consistent JSON logging across the app
 const logger = {
   info: (message, meta = {}) => {
     console.log(JSON.stringify({
@@ -28,6 +29,7 @@ const logger = {
   }
 };
 
+// Request logging middleware to track API usage and performance
 const requestLogger = (req, res, next) => {
   const start = Date.now();
   const requestId = uuidv4();
