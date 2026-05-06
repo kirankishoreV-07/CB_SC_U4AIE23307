@@ -1,3 +1,4 @@
+// update
 require('dotenv').config({ path: '.env.local' });
 const axios = require('axios');
 const knapsack = require('./knapsack');
