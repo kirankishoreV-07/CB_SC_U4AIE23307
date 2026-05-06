@@ -1,150 +1,79 @@
-# Campus Notifications — System Design Document
+# Campus Notification System
 
-This document outlines the architecture and design of the Campus Notification Platform, covering API design, database strategy, performance optimization, and bulk processing.
+This document explains the overall working and design of the campus notification platform.
 
----
+## Stage 1 — API Design
 
-## Stage 1 — REST API Design
+The system contains APIs for fetching and managing notifications for students.
 
-The notification platform follows RESTful principles, providing endpoints for fetching, managing, and streaming notifications in real-time.
+### Main APIs used:
+- `GET /notifications` → fetch all notifications
+- `GET /notifications/:id` → fetch single notification
+- `PATCH /notifications/:id/read` → mark notification as read
+- `PATCH /notifications/read-all` → mark all notifications as read
+- `DELETE /notifications/:id` → delete notification
 
-### Core Endpoints
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `GET` | `/notifications` | Fetch paginated notifications for a student |
-| `GET` | `/notifications/:id` | Fetch a single notification |
-| `PATCH` | `/notifications/:id/read` | Mark one notification as read |
-| `PATCH` | `/notifications/read-all` | Mark all as read for a student |
-| `DELETE` | `/notifications/:id` | Delete a notification |
-| `GET` | `/notifications/unread-count` | Fast count badge for the UI |
-
-### Real-Time Mechanism: Server-Sent Events (SSE)
-
-**Selection:** SSE was chosen over WebSockets for its simplicity and efficiency in one-way communication.
-- **Efficiency:** SSE uses plain HTTP, avoiding the overhead of a WebSocket handshake and maintaining a lightweight persistent connection.
-- **Reliability:** Built-in auto-reconnection and better compatibility with corporate proxies/firewalls.
-- **Suitability:** Notifications are server-to-client pushes; bidirectional communication (WebSockets) is not required for this use case.
-
-**Endpoint:** `GET /notifications/stream`
-**Payload Example:**
-```
-event: notification
-data: {"id":"uuid","type":"Placement","message":"CSX Corporation hiring","createdAt":"2026-05-06T10:00:00Z"}
-```
-
----
+For live notification updates, **Server Sent Events (SSE)** is used because it is simple and enough for one-way communication from server to users.
 
 ## Stage 2 — Database Design
 
-### Recommended Database: PostgreSQL
+**PostgreSQL** database is used because it handles relational data properly and also supports indexing and scaling better.
 
-PostgreSQL is selected for its robust support for relational data, transaction integrity (ACID), and powerful indexing capabilities. It handles millions of notifications efficiently while providing flexibility for future scale.
+### Main tables:
+- `students`
+- `notifications`
 
-### Schema Definition
+### Notification table stores:
+- notification type
+- message
+- read status
+- timestamp
 
-```sql
-CREATE TABLE students (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name        VARCHAR(255)  NOT NULL,
-  email       VARCHAR(255)  UNIQUE NOT NULL,
-  created_at  TIMESTAMP     NOT NULL DEFAULT NOW()
-);
+### For handling larger data:
+- indexing can be used
+- partitioning can be added later
+- JSONB is used for flexible metadata storage
 
-CREATE TYPE notification_type AS ENUM ('Placement', 'Result', 'Event');
+## Stage 3 — Query Optimization
 
-CREATE TABLE notifications (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  student_id      UUID          NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-  type            notification_type NOT NULL,
-  message         TEXT          NOT NULL,
-  is_read         BOOLEAN       NOT NULL DEFAULT false,
-  created_at      TIMESTAMP     NOT NULL DEFAULT NOW(),
-  metadata        JSONB
-);
-```
+Unread notification queries become slower when notification count increases.
 
-### Scale Strategy
-- **Partitioning:** Implement monthly range partitioning on `created_at` for the `notifications` table to maintain performance as data grows to tens of millions of rows.
-- **JSONB:** Used for `metadata` to store type-specific data without frequent schema migrations.
+To improve performance, indexes are added on:
+- `student_id`
+- `is_read`
+- `created_at`
 
----
+This helps avoid full table scans and improves fetching speed.
 
-## Stage 3 — Query Optimisation
+## Stage 4 — Caching
 
-### The Slow Query Problem
-A common bottleneck is fetching unread notifications for a specific student:
-```sql
-SELECT * FROM notifications 
-WHERE student_id = 'uuid-123' AND is_read = false 
-ORDER BY created_at DESC;
-```
-Without proper indexing, this results in a Sequential Scan (O(n)), which slows down significantly as the table grows.
+**Redis** caching is used to reduce database load and improve response time.
 
-### The Fix: Composite Indexing
-To optimize this, we implement a composite index:
-```sql
-CREATE INDEX idx_notif_student_unread 
-ON notifications (student_id, is_read, created_at DESC);
-```
-**Impact:** Reduces query time from O(n) to O(log n + k), where k is the number of results. The index matches the filter and sort criteria perfectly, allowing PostgreSQL to perform a fast Index Scan.
+### Cached items:
+- unread notifications
+- unread count
 
----
+Cursor-based pagination is preferred because OFFSET-based pagination becomes slower for large data.
 
-## Stage 4 — Caching & Performance
+## Stage 5 — Bulk Notifications
 
-To handle high traffic (50,000+ active students), a multi-layered caching strategy is implemented using **Redis**.
+Sending notifications one by one is not efficient for large number of students.
 
-### 1. Unread List Caching
-- **Key:** `notif:unread:{studentId}`
-- **Value:** JSON array of top N unread notifications.
-- **TTL:** 30 seconds.
-- **Invalidation:** Cache is deleted whenever a new notification is added or an existing one is marked as read.
+### Improved flow:
+- notifications are stored in bulk
+- queues are used for email processing
+- worker services handle notification sending
+- retries are added for failed deliveries
 
-### 2. Unread Count Caching
-Dedicated cache for the "badge count" to avoid frequent `COUNT(*)` queries on the primary DB.
+This improves scalability and reliability.
 
-### 3. Cursor-Based Pagination
-Instead of `OFFSET` (which still scans skipped rows), use cursor pagination:
-```sql
-SELECT * FROM notifications 
-WHERE student_id = $1 AND is_read = false AND created_at < $cursor 
-ORDER BY created_at DESC LIMIT 20;
-```
+## Stage 6 — Priority Inbox
 
----
+Notifications are sorted based on:
+- notification priority
+- latest timestamp
 
-## Stage 5 — Bulk Notification Redesign
+### Priority order:
+**Placement** notifications have highest priority, then **Result**, then **Event** notifications.
 
-### Problem with Naive Implementation
-- **Synchronous blocking:** Processing 50,000 students in a single loop blocks the main thread.
-- **Fragility:** One failure (e.g., Email API timeout) can crash the entire process.
-- **No Retries:** Transient failures result in lost notifications.
-
-### High-Scale Architecture
-1. **Batch Insert:** Perform a single bulk `INSERT` into the DB (atomic and fast).
-2. **Message Queue (Redis/RabbitMQ):** Enqueue separate jobs for delivery (Email, Push, SMS).
-3. **Worker Pool:** Dedicated workers consume jobs from the queue.
-4. **Resilience:** Built-in retries with exponential backoff and a Dead Letter Queue (DLQ) for final failures.
-
-**Separation of Concerns:** DB persistence and external delivery must be decoupled. DB is the source of truth; delivery is a side-effect that can fail and be retried independently.
-
----
-
-## Stage 6 — Priority Inbox (Working Code)
-
-The Priority Inbox is the final user-facing component that surfaces the most critical information by applying weighted sorting to live incoming data.
-
-### Weighted Priority Algorithm
-Each notification type is assigned a weight:
-- **Placement:** 3 (Highest Priority)
-- **Result:** 2
-- **Event:** 1
-
-**Sorting Logic:**
-1. Sort by `Weight` descending.
-2. For items with the same weight, sort by `Timestamp` descending (most recent first).
-
-### Performance for Live Data
-To maintain the Top N notifications in real-time without O(k log k) sorting overhead, a **Min-Heap of size N** is used. This reduces the insertion cost to O(log N) per new notification, ensuring the interface remains responsive even during high-volume periods (e.g., during placement season or result releases).
-
+**Min-Heap** approach can be used to efficiently maintain top notifications when new notifications are continuously added.
