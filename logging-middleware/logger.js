@@ -1,6 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
 
-// basic logger setup
 const logger = {
   info: (message, meta = {}) => {
     console.log(JSON.stringify({
@@ -29,7 +28,6 @@ const logger = {
   }
 };
 
-// logging the requests
 const requestLogger = (req, res, next) => {
   const start = Date.now();
   const requestId = uuidv4();
