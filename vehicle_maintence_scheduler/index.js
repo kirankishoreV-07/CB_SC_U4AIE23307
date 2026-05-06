@@ -45,7 +45,7 @@ async function main() {
 
   const results = depots.map(depot => {
     const { maxImpact, selectedTasks, hoursUsed } = knapsack(vehicles, depot.MechanicHours);
-    
+
     logger.info('Knapsack calculation completed for depot', {
       depotId: depot.ID,
       budget: depot.MechanicHours,
@@ -71,7 +71,7 @@ async function main() {
     process.stdout.write(`Depot ${r.depotId} | Budget: ${r.budget}h | Used: ${r.hoursUsed}h | Impact: ${r.totalImpact} | Tasks: ${r.taskCount}\n`);
   });
   process.stdout.write('\n');
-  
+
   logger.info('All depots processed successfully');
 }
 

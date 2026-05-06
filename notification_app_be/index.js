@@ -58,13 +58,13 @@ async function getTopNNotifications(n = TOP_N) {
 
 async function main() {
   const top = await getTopNNotifications(TOP_N);
-  
+
   process.stdout.write(`\n=== TOP ${TOP_N} PRIORITY NOTIFICATIONS ===\n\n`);
   top.forEach((n, i) => {
     process.stdout.write(`${i + 1}. [${n.Type}] ${n.Message} — ${n.Timestamp}\n`);
   });
   process.stdout.write('\n');
-  
+
   logger.info('Priority inbox processed successfully');
 }
 
