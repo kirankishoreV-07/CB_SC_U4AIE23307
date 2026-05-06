@@ -6,7 +6,7 @@ const BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://20.207.122.201/evaluati
 const TOKEN = process.env.NEXT_PUBLIC_ACCESS_TOKEN;
 const TOP_N = 10;
 
-// Priority mapping for different notification types
+// priority weights
 const WEIGHT = { Placement: 3, Result: 2, Event: 1 };
 
 if (!TOKEN) {
@@ -25,7 +25,7 @@ async function getTopNNotifications(n = TOP_N) {
 
     logger.info('Notifications fetched successfully', { total: notifications.length });
 
-    // Sort by priority first, then use timestamp as tie-breaker
+    // sorting by weight and then time
     const sorted = [...notifications].sort((a, b) => {
       const weightDiff = (WEIGHT[b.Type] ?? 0) - (WEIGHT[a.Type] ?? 0);
       if (weightDiff !== 0) return weightDiff;

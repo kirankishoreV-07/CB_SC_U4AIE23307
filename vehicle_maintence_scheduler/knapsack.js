@@ -1,4 +1,4 @@
-// Core optimization logic using 0/1 Knapsack to get max impact
+// knapsack logic for best impact
 function knapsack(tasks, capacity) {
   const n = tasks.length;
   const dp = new Array(capacity + 1).fill(0);
@@ -14,7 +14,7 @@ function knapsack(tasks, capacity) {
     }
   }
 
-  // Reconstructing selected tasks from the DP table
+  // getting the selected tasks
   const selected = [];
   let w = capacity;
   for (let i = n - 1; i >= 0; i--) {
